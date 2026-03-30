@@ -32,7 +32,7 @@ Practitioners record their session in-browser. The app transcribes the audio, se
 |-------------------|-----------------------------------|--------------------------------------------|
 | Framework         | Next.js 14+ (App Router)          | TypeScript, server components by default   |
 | UI                | React 18+, Tailwind CSS           | Use shadcn/ui for component primitives     |
-| Auth              | Clerk                             | Handles sign-up, sign-in, session, webhook |
+| Auth              | Supabase Auth                     | Built-in auth, native RLS integration      |
 | Database          | Supabase (PostgreSQL)             | Row-level security enabled                 |
 | File Storage      | Supabase Storage                  | Audio file uploads (buckets)               |
 | Transcription     | OpenAI Whisper API                | Model: `whisper-1`                         |
@@ -84,7 +84,6 @@ All API routes live under `src/app/api/` and run as Vercel serverless functions.
 |----------------------------|--------|--------------------------------------------------|
 | `/api/transcribe`          | POST   | Accepts audio file URL, calls Whisper, returns transcript |
 | `/api/generate-notes`      | POST   | Accepts transcript text, calls Claude, returns structured notes |
-| `/api/webhooks/clerk`      | POST   | Receives Clerk webhook events, syncs user to Supabase |
 | `/api/sessions`            | GET    | List sessions for authenticated user             |
 | `/api/sessions`            | POST   | Create a new session record                      |
 | `/api/sessions/[id]`       | GET    | Get single session with notes                    |
@@ -102,10 +101,9 @@ All tables live in Supabase PostgreSQL. Row-level security (RLS) is enabled on e
 ### Tables
 
 ```sql
--- Synced from Clerk via webhook
+-- id matches auth.uid() from Supabase Auth — no separate clerk_id needed
 CREATE TABLE users (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  clerk_id      TEXT UNIQUE NOT NULL,
+  id            UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email         TEXT NOT NULL,
   full_name     TEXT,
   clinic_name   TEXT,
@@ -156,8 +154,8 @@ CREATE TABLE notes (
 ### Row-Level Security Policies
 Every table must have RLS policies ensuring:
 - Users can only SELECT, INSERT, UPDATE, DELETE their own rows
-- Matching is done via `user_id` column against the authenticated Clerk user
-- The `users` table matches on `clerk_id`
+- Matching is done via `user_id` column against `auth.uid()`
+- The `users` table matches on `id = auth.uid()`
 
 ### Indexes
 ```sql
@@ -172,40 +170,55 @@ CREATE INDEX idx_notes_session_id ON notes(session_id);
 
 ## 5. Authentication Flow
 
-### Clerk Setup
-- Clerk handles all authentication UI and session management
-- Use `@clerk/nextjs` package
-- Wrap the root layout with `<ClerkProvider>`
-- Use `middleware.ts` to protect all `(dashboard)` routes
+### Supabase Auth Setup
+- Supabase Auth handles all authentication UI and session management
+- Use `@supabase/ssr` package for server-side session handling
+- Use `@supabase/supabase-js` for client-side auth
+- Protect all `(dashboard)` routes via `proxy.ts`
 
-### Middleware (`src/middleware.ts`)
+### Proxy (`src/proxy.ts`)
 ```typescript
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
 
-const isPublicRoute = createRouteMatcher([
-  "/",
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-  "/api/webhooks(.*)",
-]);
+export async function proxy(request: NextRequest) {
+  let response = NextResponse.next({ request });
 
-export default clerkMiddleware(async (auth, request) => {
-  if (!isPublicRoute(request)) {
-    await auth.protect();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll: () => request.cookies.getAll(),
+        setAll: (cookiesToSet) => {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    }
+  );
+
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const isPublic = ["/", "/sign-in", "/sign-up"].some((path) =>
+    request.nextUrl.pathname.startsWith(path)
+  );
+
+  if (!user && !isPublic) {
+    return NextResponse.redirect(new URL("/sign-in", request.url));
   }
-});
 
-export const config = {
-  matcher: ["/((?!.*\\..*|_next).*)", "/", "/(api|trpc)(.*)"],
-};
+  return response;
+}
 ```
 
-### User Sync (Clerk → Supabase)
-When a user signs up or updates their profile in Clerk:
-1. Clerk fires a webhook to `/api/webhooks/clerk`
-2. The webhook handler verifies the signature using `CLERK_WEBHOOK_SECRET`
-3. Creates or updates the corresponding row in the `users` table
-4. This ensures every Clerk user has a matching Supabase row for RLS
+### User Profile (Supabase Auth → users table)
+When a user signs up via Supabase Auth:
+1. A row is automatically available in `auth.users`
+2. Create a corresponding row in the public `users` table via a Postgres trigger or on first dashboard load
+3. `users.id` is set to `auth.uid()` — no webhook or sync needed
+4. RLS policies use `auth.uid()` natively — no token mapping required
 
 ---
 
@@ -381,7 +394,7 @@ The system prompt must instruct Claude to:
 - Click any session to view notes
 
 #### Settings (`/settings`)
-- Account info (from Clerk, read-only)
+- Account info (from Supabase Auth, read-only)
 - Clinic name (editable)
 - Preferences placeholder for Phase 2
 
@@ -447,8 +460,7 @@ therapy-notes/
 │   │       ├── sessions/route.ts
 │   │       ├── sessions/[id]/route.ts
 │   │       ├── patients/route.ts
-│   │       ├── patients/[id]/route.ts
-│   │       └── webhooks/clerk/route.ts
+│   │       └── patients/[id]/route.ts
 │   ├── components/
 │   │   ├── ui/              # shadcn/ui primitives
 │   │   ├── layout/          # sidebar, header, mobile-nav
@@ -456,7 +468,6 @@ therapy-notes/
 │   │   └── patients/        # patient-card, patient-form
 │   ├── lib/
 │   │   ├── supabase/        # client.ts, server.ts, admin.ts
-│   │   ├── clerk/           # server.ts
 │   │   ├── ai/
 │   │   │   ├── transcribe.ts
 │   │   │   ├── generate-notes.ts
@@ -574,15 +585,6 @@ Use `@/` path alias pointing to `src/`:
 ```bash
 # .env.example
 
-# ──── Clerk ────
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-CLERK_SECRET_KEY=sk_test_...
-CLERK_WEBHOOK_SECRET=whsec_...
-NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
-NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
-NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
-NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
-
 # ──── Supabase ────
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
@@ -599,7 +601,6 @@ ANTHROPIC_API_KEY=sk-ant-...
 - Never commit `.env.local` — it is in `.gitignore`
 - `NEXT_PUBLIC_` prefixed vars are exposed to the browser — only use for non-secret values
 - `SUPABASE_SERVICE_ROLE_KEY` is **never** exposed client-side — server/API routes only
-- `CLERK_SECRET_KEY` is server-side only
 
 ---
 
@@ -731,17 +732,15 @@ Sessions move through a defined set of states:
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
     "typescript": "^5.0.0",
-    "@clerk/nextjs": "^5.0.0",
     "@supabase/supabase-js": "^2.0.0",
-    "@supabase/ssr": "^0.0.0",
+    "@supabase/ssr": "^0.6.0",
     "openai": "^4.0.0",
     "@anthropic-ai/sdk": "^0.0.0",
     "tailwindcss": "^3.4.0",
     "class-variance-authority": "^0.0.0",
     "clsx": "^2.0.0",
     "tailwind-merge": "^2.0.0",
-    "lucide-react": "^0.0.0",
-    "svix": "^1.0.0"
+    "lucide-react": "^0.0.0"
   }
 }
 ```
@@ -756,7 +755,7 @@ When generating code for this project:
 
 1. **Always use TypeScript** — no `.js` files in `src/`
 2. **Always handle errors** — every `try/catch`, every API response, every Supabase query
-3. **Always check auth** — use Clerk's `auth()` helper in API routes and server components
+3. **Always check auth** — use Supabase's `supabase.auth.getUser()` in API routes and server components
 4. **Never expose secrets client-side** — `SUPABASE_SERVICE_ROLE_KEY`, `CLERK_SECRET_KEY`, API keys are server-only
 5. **Use the `@/` import alias** — not relative paths like `../../../lib/`
 6. **Server Components by default** — only add `"use client"` when state or browser APIs are needed

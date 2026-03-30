@@ -2,8 +2,7 @@
 // Convert to camelCase at the data layer before passing to components.
 
 export interface UserRow {
-  id: string;
-  clerk_id: string;
+  id: string; // matches auth.uid() from Supabase Auth
   email: string;
   full_name: string | null;
   clinic_name: string | null;

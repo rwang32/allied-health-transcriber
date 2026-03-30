@@ -19,7 +19,7 @@ pnpm lint       # Run ESLint (uses eslint directly — NOT next lint)
 
 ## Architecture
 
-The target stack is: Next.js 16 App Router, React 19, Tailwind CSS v4, Clerk (auth), Supabase (Postgres + Storage), OpenAI Whisper (transcription), Anthropic Claude (note generation).
+The target stack is: Next.js 16 App Router, React 19, Tailwind CSS v4, Supabase Auth, Supabase (Postgres + Storage), OpenAI Whisper (transcription), Anthropic Claude (note generation).
 
 **Current state:** bare `create-next-app` scaffold. Only `app/layout.tsx`, `app/page.tsx`, and `app/globals.css` exist. All feature code remains to be built.
 

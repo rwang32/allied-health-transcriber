@@ -7,7 +7,6 @@ import type { Session, SessionWithPatient } from "@/types/session";
 
 export const MOCK_USER: User = {
   id: "550e8400-e29b-41d4-a716-446655440000",
-  clerkId: "user_mock_clerk_id",
   email: "sarah.chen@westcoastphysio.ca",
   fullName: "Sarah Chen",
   clinicName: "West Coast Physiotherapy",
