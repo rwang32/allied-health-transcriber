@@ -1,7 +1,8 @@
+import { getMockPatientsWithLastSession } from "@/lib/mock-data";
+import { NewSessionWizard } from "@/components/sessions/new-session-wizard";
+
 export default function NewSessionPage(): React.JSX.Element {
-  return (
-    <main>
-      <h1>New Session</h1>
-    </main>
-  );
+  const patients = getMockPatientsWithLastSession();
+
+  return <NewSessionWizard patients={patients} />;
 }

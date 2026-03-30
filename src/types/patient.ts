@@ -21,3 +21,9 @@ export interface PatientFormData {
   phone: string;
   notes: string;
 }
+
+// Patient joined with their most recent session data — used in patient selection UI
+export interface PatientWithLastSession extends Patient {
+  lastSessionDate: string | null;
+  lastSessionSummary: string | null;
+}

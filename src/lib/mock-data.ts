@@ -2,7 +2,7 @@
 // Replace calls to these with real server-side Supabase queries when ready.
 
 import type { User } from "@/types/user";
-import type { Patient } from "@/types/patient";
+import type { Patient, PatientWithLastSession } from "@/types/patient";
 import type { Session, SessionWithPatient } from "@/types/session";
 
 export const MOCK_USER: User = {
@@ -212,6 +212,20 @@ export const MOCK_SESSIONS: Session[] = [
   },
 ];
 
+// Clinical summary snippets keyed by session ID — simulates the notes table
+const MOCK_CLINICAL_SUMMARIES: Record<string, string> = {
+  ses_001:
+    "L4-L5 mobility continuing to improve. Soft tissue work to bilateral paraspinal muscles and left QL. Patient reports 30% reduction in morning stiffness. Home exercise compliance good — reviewed hip hinge technique.",
+  ses_002:
+    "Right IT band syndrome. Lateral hip tightness noted on palpation. Corrected foam rolling technique. Added clamshell and lateral band walk exercises to home program. 5km run cleared with modified warm-up protocol.",
+  ses_003:
+    "ACL rehab week 8 post-op. Quadriceps strength at 78% of contralateral side on single-leg press. Introduced single-leg squat progression. Swelling minimal. Return-to-sport timeline on track for 14 weeks.",
+  ses_004:
+    "Cervical and upper trapezius tension, C4-C6 bilateral. Trigger point release performed. Patient reports headaches reduced since last visit. Ergonomic workstation review completed — monitor height adjusted.",
+  ses_010:
+    "Bilateral shoulder mobility assessment. Restricted right external rotation (55°). Joint mobilisation grade III applied. Posture education provided. Patient to continue thoracic extension over foam roller daily.",
+};
+
 // Helpers used by server components to simulate data fetching
 
 function getPatientById(id: string): Patient | undefined {
@@ -245,4 +259,19 @@ export function getMockSessionsThisWeek(): number {
 
 export function getMockTotalPatients(): number {
   return MOCK_PATIENTS.length;
+}
+
+export function getMockPatientsWithLastSession(): PatientWithLastSession[] {
+  return MOCK_PATIENTS.map((patient) => {
+    const lastCompleteSession = MOCK_SESSIONS.find(
+      (s) => s.patientId === patient.id && s.status === "complete"
+    );
+    return {
+      ...patient,
+      lastSessionDate: lastCompleteSession?.sessionDate ?? null,
+      lastSessionSummary: lastCompleteSession
+        ? (MOCK_CLINICAL_SUMMARIES[lastCompleteSession.id] ?? null)
+        : null,
+    };
+  });
 }
