@@ -21,9 +21,9 @@ pnpm lint       # Run ESLint (uses eslint directly — NOT next lint)
 
 The target stack is: Next.js 16 App Router, React 19, Tailwind CSS v4, Supabase Auth, Supabase (Postgres + Storage), OpenAI Whisper (transcription), Anthropic Claude (note generation).
 
-**Current state:** bare `create-next-app` scaffold. Only `app/layout.tsx`, `app/page.tsx`, and `app/globals.css` exist. All feature code remains to be built.
+**Current state:** `src/` layout is in place. Supabase clients, API routes, and some UI components exist (see below).
 
-**Planned structure:** SPEC.md describes a `src/` layout (`src/app/`, `src/components/`, `src/lib/`, `src/hooks/`, `src/types/`). The scaffold currently has `app/` at the root without `src/`. Follow the SPEC directory layout when creating new files.
+**Structure:** `src/app/`, `src/components/`, `src/lib/`, `src/hooks/`, `src/types/`.
 
 ## Next.js 16 Breaking Changes
 
@@ -63,6 +63,34 @@ ESLint 9 flat config (`eslint.config.mjs`) is used — no `.eslintrc`. Run `esli
 - **Turbopack** is the default bundler for both `dev` and `build`. No `--turbopack` flag needed.
 - `cacheLife` / `cacheTag` no longer need the `unstable_` prefix — import directly from `next/cache`.
 - `experimental.turbopack` config is now top-level `turbopack` in `next.config.ts`.
+
+## Supabase Clients
+
+Three clients in `src/lib/supabase/`:
+
+| File | Factory | When to use |
+|------|---------|-------------|
+| `client.ts` | `createClient()` | Client components (browser) |
+| `server.ts` | `createServerSupabaseClient()` | Server components, Route Handlers, Server Actions — reads `cookies()` |
+| `admin.ts` | `createAdminClient()` | Server-only; bypasses RLS via service-role key. **Never import in client components.** |
+
+All route handlers call `supabase.auth.getUser()` and return 401 if no user.
+
+## API Routes
+
+All routes live under `src/app/api/` and use `createServerSupabaseClient`. Errors return `{ error: { message, code } }`.
+
+### `POST /api/sessions`
+Creates a session. Body: `{ patientId: string, durationMinutes?: number }`. Sets `status: "recording"`. Returns `201` with the created `Session`.
+
+### `PATCH /api/sessions/[id]`
+Updates a session. Body (all optional): `{ audioUrl, status, errorMessage, durationMinutes }`. Returns `{ data: { id } }`.
+
+### `GET /api/patients`
+Returns all patients for the authenticated user, ordered by `last_name`.
+
+### `POST /api/patients`
+Creates a patient. Body: `{ firstName: string, lastName: string, dateOfBirth?, email?, phone?, notes? }`. Returns `201` with the created `Patient`.
 
 ## Tailwind CSS v4
 

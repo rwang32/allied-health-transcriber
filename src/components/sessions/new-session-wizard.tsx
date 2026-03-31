@@ -7,18 +7,13 @@ import { ConsentGate } from "@/components/sessions/consent-gate";
 import { PatientSelector, type PatientSelection } from "@/components/sessions/patient-selector";
 import { AudioRecorder } from "@/components/sessions/audio-recorder";
 import { ProcessingStatus, type PipelineStage } from "@/components/sessions/processing-status";
+import { createClient } from "@/lib/supabase/client";
 import type { PatientWithLastSession } from "@/types/patient";
 import { cn } from "@/lib/utils/cn";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type WizardStep = "consent" | "patient" | "recording" | "processing" | "complete";
-
-interface RecordingResult {
-  blob: Blob;
-  duration: number;
-  patientName: string;
-}
 
 // ── Step Indicator ────────────────────────────────────────────────────────────
 
@@ -89,10 +84,9 @@ function StepIndicator({ currentStep }: StepIndicatorProps): React.JSX.Element |
   );
 }
 
-// ── Mock Pipeline ─────────────────────────────────────────────────────────────
+// ── Mock delays for transcription/generation (Steps 5–6, wired later) ─────────
 
-const PIPELINE_DELAYS: Record<Exclude<PipelineStage, "complete" | "error">, number> = {
-  uploading: 1500,
+const MOCK_DELAYS: Record<"transcribing" | "generating", number> = {
   transcribing: 2500,
   generating: 3000,
 };
@@ -149,19 +143,29 @@ function CompleteStep({ sessionId }: CompleteStepProps): React.JSX.Element {
 
 interface NewSessionWizardProps {
   patients: PatientWithLastSession[];
+  /** Pre-select a patient and skip to consent step. Used when navigating from a patient profile. */
+  defaultPatientId?: string;
 }
 
-export function NewSessionWizard({ patients }: NewSessionWizardProps): React.JSX.Element {
-  const [step, setStep] = useState<WizardStep>("consent");
-  const [selectedPatientName, setSelectedPatientName] = useState<string>("");
-  const [recordingResult, setRecordingResult] = useState<RecordingResult | null>(null);
+export function NewSessionWizard({ patients, defaultPatientId }: NewSessionWizardProps): React.JSX.Element {
+  const defaultPatient = defaultPatientId
+    ? (patients.find((p) => p.id === defaultPatientId) ?? null)
+    : null;
+
+  const [step, setStep] = useState<WizardStep>(defaultPatient ? "consent" : "patient");
+  const [selectedPatientName, setSelectedPatientName] = useState<string>(
+    defaultPatient ? `${defaultPatient.firstName} ${defaultPatient.lastName}` : "",
+  );
+  const [selectedPatientSelection, setSelectedPatientSelection] = useState<PatientSelection | null>(
+    defaultPatient ? { type: "existing", patient: defaultPatient } : null,
+  );
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [lastBlob, setLastBlob] = useState<{ blob: Blob; duration: number } | null>(null);
   const [pipelineStage, setPipelineStage] = useState<PipelineStage>("uploading");
   const [pipelineError, setPipelineError] = useState<string | null>(null);
-  // Mock session ID — will be a real DB-generated UUID once API routes are wired
-  const MOCK_SESSION_ID = "ses_001";
 
   const handleConsentConfirm = (): void => {
-    setStep("patient");
+    setStep("recording");
   };
 
   const handlePatientSelected = (selection: PatientSelection): void => {
@@ -170,46 +174,100 @@ export function NewSessionWizard({ patients }: NewSessionWizardProps): React.JSX
         ? `${selection.patient.firstName} ${selection.patient.lastName}`
         : `${selection.formData.firstName} ${selection.formData.lastName}`;
     setSelectedPatientName(name);
-    setStep("recording");
+    setSelectedPatientSelection(selection);
+    setStep("consent");
   };
 
   const runPipeline = useCallback(async (blob: Blob, duration: number): Promise<void> => {
     setStep("processing");
     setPipelineError(null);
+    setPipelineStage("uploading");
 
     try {
-      // Simulate upload
-      setPipelineStage("uploading");
-      await delay(PIPELINE_DELAYS.uploading);
+      const supabase = createClient();
 
-      // Simulate transcription
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) throw new Error("Not authenticated");
+
+      // ── 1. Resolve patient ID (create if new) ───────────────────────────────
+      let patientId: string;
+
+      if (selectedPatientSelection?.type === "existing") {
+        patientId = selectedPatientSelection.patient.id;
+      } else if (selectedPatientSelection?.type === "new") {
+        const res = await fetch("/api/patients", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(selectedPatientSelection.formData),
+        });
+        const json = await res.json() as { data?: { id: string }; error?: { message: string } };
+        if (!res.ok) throw new Error(json.error?.message ?? "Failed to create patient");
+        patientId = json.data!.id;
+      } else {
+        throw new Error("No patient selected");
+      }
+
+      // ── 2. Create session record ────────────────────────────────────────────
+      const sessionRes = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId,
+          durationMinutes: Math.ceil(duration / 60),
+        }),
+      });
+      const sessionJson = await sessionRes.json() as { data?: { id: string }; error?: { message: string } };
+      if (!sessionRes.ok) throw new Error(sessionJson.error?.message ?? "Failed to create session");
+      const sessionId = sessionJson.data!.id;
+      setCurrentSessionId(sessionId);
+
+      // ── 3. Upload audio to Supabase Storage ─────────────────────────────────
+      const ext = blob.type.includes("mp4") ? "mp4" : "webm";
+      const storagePath = `${user.id}/${sessionId}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("session-audio")
+        .upload(storagePath, blob, { contentType: blob.type, upsert: false });
+
+      if (uploadError) throw new Error(uploadError.message);
+
+      // ── 4. Save audio path to session ────────────────────────────────────────
+      const patchRes = await fetch(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audioUrl: storagePath, status: "transcribing" }),
+      });
+      if (!patchRes.ok) {
+        const patchJson = await patchRes.json() as { error?: { message: string } };
+        throw new Error(patchJson.error?.message ?? "Failed to save audio URL");
+      }
+
+      // ── 5–6. Transcription + generation (mocked — wired in next batch) ───────
       setPipelineStage("transcribing");
-      await delay(PIPELINE_DELAYS.transcribing);
+      await delay(MOCK_DELAYS.transcribing);
 
-      // Simulate note generation
       setPipelineStage("generating");
-      await delay(PIPELINE_DELAYS.generating);
+      await delay(MOCK_DELAYS.generating);
 
       setPipelineStage("complete");
       setStep("complete");
-    } catch {
+    } catch (err) {
       setPipelineStage("error");
-      setPipelineError("Something went wrong. Please try again.");
+      setPipelineError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     }
-
-    // Suppress unused variable warnings — blob/duration will be used when real API routes are wired
-    void blob;
-    void duration;
-  }, []);
+  }, [selectedPatientSelection]);
 
   const handleRecordingComplete = (blob: Blob, duration: number): void => {
-    setRecordingResult({ blob, duration, patientName: selectedPatientName });
+    setLastBlob({ blob, duration });
     void runPipeline(blob, duration);
   };
 
   const handleRetry = (): void => {
-    if (recordingResult) {
-      void runPipeline(recordingResult.blob, recordingResult.duration);
+    if (lastBlob) {
+      void runPipeline(lastBlob.blob, lastBlob.duration);
     }
   };
 
@@ -266,7 +324,7 @@ export function NewSessionWizard({ patients }: NewSessionWizardProps): React.JSX
             </div>
             <ProcessingStatus
               patientName={selectedPatientName}
-              durationSeconds={recordingResult?.duration ?? 0}
+              durationSeconds={lastBlob?.duration ?? 0}
               currentStage={pipelineStage}
               errorMessage={pipelineError}
               onRetry={pipelineStage === "error" ? handleRetry : undefined}
@@ -274,7 +332,9 @@ export function NewSessionWizard({ patients }: NewSessionWizardProps): React.JSX
           </div>
         )}
 
-        {step === "complete" && <CompleteStep sessionId={MOCK_SESSION_ID} />}
+        {step === "complete" && currentSessionId && (
+          <CompleteStep sessionId={currentSessionId} />
+        )}
       </div>
     </div>
   );

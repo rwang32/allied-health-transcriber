@@ -53,7 +53,7 @@ function PatientCard({ patient, isSelected, onSelect }: PatientCardProps): React
         "group relative w-full rounded-xl border p-4 text-left transition-all",
         isSelected
           ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500 dark:border-blue-500 dark:bg-blue-950/40"
-          : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
+          : "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
       )}
     >
       {/* Selected checkmark */}
