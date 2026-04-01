@@ -55,6 +55,41 @@ export async function GET(
   return NextResponse.json({ data: rowToPatient(data as PatientRow) });
 }
 
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<NextResponse> {
+  const supabase = await createServerSupabaseClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json(
+      { error: { message: "Unauthorized", code: "unauthorized" } },
+      { status: 401 },
+    );
+  }
+
+  const { id } = await params;
+
+  const { error } = await supabase
+    .from("patients")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return NextResponse.json(
+      { error: { message: error.message, code: error.code } },
+      { status: 500 },
+    );
+  }
+
+  return new NextResponse(null, { status: 204 });
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
