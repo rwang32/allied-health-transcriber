@@ -41,12 +41,20 @@ export function useAudioRecorder(): UseAudioRecorderResult {
   const startLevelMonitor = useCallback((): void => {
     if (!analyserRef.current) return;
     const analyser = analyserRef.current;
-    const data = new Uint8Array(analyser.frequencyBinCount);
+    const data = new Uint8Array(analyser.fftSize);
 
     const tick = (): void => {
-      analyser.getByteFrequencyData(data);
-      const avg = data.reduce((a, b) => a + b, 0) / data.length;
-      setAudioLevel(avg / 255);
+      analyser.getByteTimeDomainData(data);
+      // RMS of the waveform deviation from silence (128)
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = (data[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      const level = Math.min(1, rms * 10);
+      setAudioLevel(level);
+      (window as unknown as Record<string, unknown>)._audioLevel = level;
       animFrameRef.current = requestAnimationFrame(tick);
     };
     animFrameRef.current = requestAnimationFrame(tick);
@@ -64,6 +72,9 @@ export function useAudioRecorder(): UseAudioRecorderResult {
       // Audio context for level monitoring
       const audioContext = new AudioContext();
       audioContextRef.current = audioContext;
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
       const source = audioContext.createMediaStreamSource(stream);
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
@@ -88,6 +99,7 @@ export function useAudioRecorder(): UseAudioRecorderResult {
         resolveStopRef.current = null;
         streamRef.current?.getTracks().forEach((t) => t.stop());
         audioContextRef.current?.close();
+        audioContextRef.current = null;
       };
 
       mediaRecorder.start(1000); // collect chunks every second
@@ -158,7 +170,10 @@ export function useAudioRecorder(): UseAudioRecorderResult {
       if (timerRef.current) clearInterval(timerRef.current);
       stopLevelMonitor();
       streamRef.current?.getTracks().forEach((t) => t.stop());
-      audioContextRef.current?.close();
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
     };
   }, [stopLevelMonitor]);
 

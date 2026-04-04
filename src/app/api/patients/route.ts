@@ -82,6 +82,11 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const b = body as Record<string, unknown>;
 
+  // Ensure user row exists before inserting patient (required by FK)
+  await supabase
+    .from("users")
+    .upsert({ id: user.id, email: user.email ?? "" }, { onConflict: "id", ignoreDuplicates: true });
+
   const { data, error } = await supabase
     .from("patients")
     .insert({

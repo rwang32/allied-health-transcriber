@@ -225,7 +225,9 @@ export function PatientSelector({ patients, onContinue }: PatientSelectorProps):
       <div className="mb-4 space-y-2 max-h-[420px] overflow-y-auto pr-1">
         {filtered.length === 0 ? (
           <p className="py-6 text-center text-sm text-zinc-400">
-            No patients match &ldquo;{search}&rdquo;
+            {search
+              ? <>No patients match &ldquo;{search}&rdquo;</>
+              : "No patients yet — add one below"}
           </p>
         ) : (
           filtered.map((p) => (

@@ -84,16 +84,6 @@ function StepIndicator({ currentStep }: StepIndicatorProps): React.JSX.Element |
   );
 }
 
-// ── Mock delays for transcription/generation (Steps 5–6, wired later) ─────────
-
-const MOCK_DELAYS: Record<"transcribing" | "generating", number> = {
-  transcribing: 2500,
-  generating: 3000,
-};
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 // ── Complete Step ─────────────────────────────────────────────────────────────
 
@@ -245,12 +235,26 @@ export function NewSessionWizard({ patients, defaultPatientId }: NewSessionWizar
         throw new Error(patchJson.error?.message ?? "Failed to save audio URL");
       }
 
-      // ── 5–6. Transcription + generation (mocked — wired in next batch) ───────
+      // ── 5. Transcribe ────────────────────────────────────────────────────────
       setPipelineStage("transcribing");
-      await delay(MOCK_DELAYS.transcribing);
+      const transcribeRes = await fetch("/api/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const transcribeJson = await transcribeRes.json() as { data?: { transcript: string }; error?: { message: string } };
+      if (!transcribeRes.ok) throw new Error(transcribeJson.error?.message ?? "Transcription failed");
+      const transcript = transcribeJson.data!.transcript;
 
+      // ── 6. Generate notes ────────────────────────────────────────────────────
       setPipelineStage("generating");
-      await delay(MOCK_DELAYS.generating);
+      const generateRes = await fetch("/api/generate-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, transcript }),
+      });
+      const generateJson = await generateRes.json() as { data?: unknown; error?: { message: string } };
+      if (!generateRes.ok) throw new Error(generateJson.error?.message ?? "Note generation failed");
 
       setPipelineStage("complete");
       setStep("complete");

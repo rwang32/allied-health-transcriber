@@ -18,8 +18,9 @@ function formatDuration(seconds: number): string {
 // ── Audio Level Visualizer ────────────────────────────────────────────────────
 
 // Fixed per-bar multipliers give the visualizer a natural waveform shape
-const BAR_MULTIPLIERS = [0.55, 0.8, 1.0, 0.9, 0.75, 1.0, 0.85, 0.6];
-const MIN_BAR_HEIGHT = 4; // px, always visible even at silence
+const BAR_MULTIPLIERS = [0.5, 0.75, 0.95, 1.0, 0.9, 1.0, 0.8, 0.55];
+const MIN_BAR_HEIGHT = 3; // px, always visible even at silence
+const MAX_BAR_HEIGHT = 48; // px
 
 interface AudioVisualizerProps {
   level: number; // 0–1
@@ -31,17 +32,17 @@ function AudioVisualizer({ level, isActive }: AudioVisualizerProps): React.JSX.E
     <div
       className="flex items-end justify-center gap-1"
       aria-hidden="true"
-      style={{ height: 40 }}
+      style={{ height: MAX_BAR_HEIGHT }}
     >
       {BAR_MULTIPLIERS.map((mult, i) => {
         const height = isActive
-          ? Math.max(MIN_BAR_HEIGHT, Math.round(level * mult * 36))
+          ? Math.max(MIN_BAR_HEIGHT, Math.round(level * mult * MAX_BAR_HEIGHT))
           : MIN_BAR_HEIGHT;
         return (
           <div
             key={i}
             className={cn(
-              "w-1.5 rounded-full transition-all duration-75",
+              "w-1.5 rounded-full transition-none",
               isActive ? "bg-red-500" : "bg-zinc-300 dark:bg-zinc-600"
             )}
             style={{ height }}

@@ -9,11 +9,11 @@ function rowToSession(row: SessionRow): Session {
     userId: row.user_id,
     patientId: row.patient_id,
     sessionDate: row.session_date,
-    durationMinutes: row.duration_minutes ?? undefined,
-    audioUrl: row.audio_url ?? undefined,
-    transcript: row.transcript ?? undefined,
+    durationMinutes: row.duration_minutes ?? null,
+    audioUrl: row.audio_url ?? null,
+    transcript: row.transcript ?? null,
     status: row.status,
-    errorMessage: row.error_message ?? undefined,
+    errorMessage: row.error_message ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -48,6 +48,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const b = body as Record<string, unknown>;
+
+  // Ensure user row exists (required by FK — safe to upsert on every session create)
+  await supabase
+    .from("users")
+    .upsert({ id: user.id, email: user.email ?? "" }, { onConflict: "id", ignoreDuplicates: true });
 
   const { data, error } = await supabase
     .from("sessions")
