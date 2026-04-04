@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   CalendarDays,
   Users,
@@ -8,13 +9,9 @@ import {
   AlertCircle,
   Loader2,
 } from "lucide-react";
-import {
-  MOCK_USER,
-  getMockRecentSessions,
-  getMockSessionsThisWeek,
-  getMockTotalPatients,
-} from "@/lib/mock-data";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { SessionStatus, SessionWithPatient } from "@/types/session";
+import type { UserRow } from "@/types/database";
 import { cn } from "@/lib/utils/cn";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -156,11 +153,87 @@ function SessionRow({ session }: SessionRowProps): React.JSX.Element {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function DashboardPage(): React.JSX.Element {
-  const user = MOCK_USER;
-  const recentSessions = getMockRecentSessions(10);
-  const sessionsThisWeek = getMockSessionsThisWeek();
-  const totalPatients = getMockTotalPatients();
+export default async function DashboardPage(): Promise<React.JSX.Element> {
+  const supabase = await createServerSupabaseClient();
+
+  const {
+    data: { user: authUser },
+  } = await supabase.auth.getUser();
+
+  if (!authUser) redirect("/sign-in");
+
+  // Fetch user profile, recent sessions (joined with patient), and stats in parallel
+  const [profileResult, sessionsResult, patientsResult] = await Promise.all([
+    supabase
+      .from("users")
+      .select("*")
+      .eq("id", authUser.id)
+      .single(),
+    supabase
+      .from("sessions")
+      .select(
+        "*, patients!inner(first_name, last_name)"
+      )
+      .eq("user_id", authUser.id)
+      .order("session_date", { ascending: false })
+      .limit(10),
+    supabase
+      .from("patients")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", authUser.id),
+  ]);
+
+  const profile = profileResult.data as UserRow | null;
+  console.log("🚀 ~ DashboardPage ~ profile:", profile)
+  const displayName = profile?.full_name?.split(" ")[0] ?? authUser.email;
+  console.log("🚀 ~ DashboardPage ~ displayName:", displayName)
+  const clinicName = profile?.clinic_name ?? null;
+
+  // Map sessions to SessionWithPatient
+  type SessionJoinRow = {
+    id: string;
+    user_id: string;
+    patient_id: string;
+    session_date: string;
+    duration_minutes: number | null;
+    audio_url: string | null;
+    transcript: string | null;
+    status: SessionStatus;
+    error_message: string | null;
+    created_at: string;
+    updated_at: string;
+    patients: { first_name: string; last_name: string };
+  };
+
+  const recentSessions: SessionWithPatient[] = (
+    (sessionsResult.data ?? []) as SessionJoinRow[]
+  ).map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    patientId: row.patient_id,
+    sessionDate: row.session_date,
+    durationMinutes: row.duration_minutes,
+    audioUrl: row.audio_url,
+    transcript: row.transcript,
+    status: row.status,
+    errorMessage: row.error_message,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    patientFirstName: row.patients.first_name,
+    patientLastName: row.patients.last_name,
+  }));
+
+  const totalPatients = patientsResult.count ?? 0;
+
+  // Sessions this week
+  const weekStart = new Date();
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  weekStart.setHours(0, 0, 0, 0);
+  const { count: sessionsThisWeek } = await supabase
+    .from("sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", authUser.id)
+    .gte("session_date", weekStart.toISOString());
 
   const greeting = (): string => {
     const hour = new Date().getHours();
@@ -176,11 +249,11 @@ export default function DashboardPage(): React.JSX.Element {
         <div>
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
             {greeting()},{" "}
-            {user.fullName?.split(" ")[0] ?? user.email}
+            {displayName}
           </h1>
-          {user.clinicName && (
+          {clinicName && (
             <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
-              {user.clinicName}
+              {clinicName}
             </p>
           )}
         </div>
@@ -199,7 +272,7 @@ export default function DashboardPage(): React.JSX.Element {
         <StatCard
           icon={<CalendarDays className="h-5 w-5" />}
           label="Sessions This Week"
-          value={sessionsThisWeek}
+          value={sessionsThisWeek ?? 0}
         />
         <StatCard
           icon={<Users className="h-5 w-5" />}
