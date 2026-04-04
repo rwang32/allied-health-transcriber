@@ -13,6 +13,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { SessionStatus, SessionWithPatient } from "@/types/session";
 import type { UserRow } from "@/types/database";
 import { cn } from "@/lib/utils/cn";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -258,13 +259,16 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
           )}
         </div>
 
-        <Link
-          href="/sessions/new"
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-        >
-          <PlusCircle className="h-4 w-4" />
-          New Session
-        </Link>
+        <div className="flex items-center gap-2">
+          <SignOutButton />
+          <Link
+            href="/sessions/new"
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+          >
+            <PlusCircle className="h-4 w-4" />
+            New Session
+          </Link>
+        </div>
       </div>
 
       {/* Stats */}

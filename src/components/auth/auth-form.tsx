@@ -115,7 +115,11 @@ export function AuthForm({ mode }: AuthFormProps): React.JSX.Element {
         {mode === "sign-up" ? (
           <>Already have an account?{" "}<Link href="/sign-in" className="text-blue-600 hover:underline">Sign in</Link></>
         ) : (
-          <>No account?{" "}<Link href="/sign-up" className="text-blue-600 hover:underline">Sign up</Link></>
+          <>
+            <Link href="/forgot-password" className="text-blue-600 hover:underline">Forgot password?</Link>
+            <span className="mx-2">·</span>
+            No account?{" "}<Link href="/sign-up" className="text-blue-600 hover:underline">Sign up</Link>
+          </>
         )}
       </p>
     </form>
